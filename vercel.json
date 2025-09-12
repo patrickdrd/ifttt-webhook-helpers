@@ -1,4 +1,10 @@
 {
+	"rewrites": [
+		{
+			"source": "/feeds/:id",
+			"destination": "/api/rss-app"
+		}
+	],
 	"github": {
 		"silent": true
 	}

@@ -1,7 +1,7 @@
 import type { VercelApiHandler } from '@vercel/node'
 import { request } from 'undici'
 
-const DOMAINS = ['t.co']
+const DOMAINS = ['t.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly', 'rebrand.ly', 'is.gd', 'soo.gd', 's.id', 'cutt.ly']
 
 const handler: VercelApiHandler = async (req, res) => {
 	const { id } = req.query as { id: string }

@@ -31,43 +31,6 @@ const handler: VercelApiHandler = async (req, res) => {
 		text = text.replaceAll(link, resolvedUrl)
 	}
 
-  // 3. Remove duplicate pic.twitter.com images
-  try {
-    const dom = new JSDOM(text, { contentType: "text/xml" })
-    const doc = dom.window.document
-
-    doc.querySelectorAll('item').forEach(item => {
-      const seen = new Set<string>()
-
-      // Collect all enclosure/media:content images
-      item.querySelectorAll('enclosure, media\\:content').forEach(node => {
-        const url = node.getAttribute('url')
-        if (url) seen.add(url.split('?')[0])
-      })
-
-      // Remove <a href="https://pic.twitter.com/..."> inside description if duplicate
-      const descNode = item.querySelector('description')
-      if (descNode && descNode.textContent) {
-        const descDom = new JSDOM(descNode.textContent)
-        const descDoc = descDom.window.document
-
-        descDoc.querySelectorAll('a[href*="pic.twitter.com"]').forEach(link => {
-          const img = link.querySelector('img')
-          if (img && seen.has(img.src.split('?')[0])) {
-            link.remove()
-          }
-        })
-
-        // Write cleaned description back
-        descNode.textContent = descDoc.body.innerHTML
-      }
-    })
-
-    text = dom.serialize()
-  } catch (err) {
-    console.error('Duplicate cleaner error:', err)
-  }
-
 	res
 		.status(200)
 		.setHeader('content-type', 'text/xml; charset=utf-8')

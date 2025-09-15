@@ -1,11 +1,11 @@
-const { request } = require('undici');
+import { request } from 'undici';
 
 const DOMAINS = [
   't.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly',
   'rebrand.ly', 'is.gd', 'soo.gd', 's.id', 'cutt.ly'
 ];
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   const { id } = req.query;
 
   try {
@@ -34,18 +34,15 @@ module.exports = async (req, res) => {
     }
 
     // 3. Remove duplicate pic.twitter.com images
-    // Keep track of seen images (without query params)
     const seenImages = new Set();
 
     text = text.replace(/<item>[\s\S]*?<\/item>/g, itemBlock => {
       // Collect image URLs from enclosure/media:content
-      const imgUrls = [...itemBlock.matchAll(/<enclosure[^>]+url="([^"]+)"/g)]
-        .map(m => m[1].split('?')[0]);
-      const mediaUrls = [...itemBlock.matchAll(/<media:content[^>]+url="([^"]+)"/g)]
-        .map(m => m[1].split('?')[0]);
+      const imgUrls = [...itemBlock.matchAll(/<enclosure[^>]+url="([^"]+)"/g)].map(m => m[1].split('?')[0]);
+      const mediaUrls = [...itemBlock.matchAll(/<media:content[^>]+url="([^"]+)"/g)].map(m => m[1].split('?')[0]);
       imgUrls.concat(mediaUrls).forEach(url => seenImages.add(url));
 
-      // Remove pic.twitter.com links in description if already seen
+      // Remove pic.twitter.com links in description if duplicate
       const cleanedItem = itemBlock.replace(
         /<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/,
         (match, descContent) => {
@@ -77,5 +74,4 @@ module.exports = async (req, res) => {
     console.error(err);
     res.status(500).send('Server error');
   }
-};
-	
+						}

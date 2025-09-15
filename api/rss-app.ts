@@ -1,3 +1,5 @@
+// api/resolve-links.ts
+
 const { request } = require('undici');
 const { JSDOM } = require('jsdom');
 
@@ -6,7 +8,7 @@ const DOMAINS = [
   'rebrand.ly', 'is.gd', 'soo.gd', 's.id', 'cutt.ly'
 ];
 
-module.exports = async (req, res) => {
+const handler = async (req, res) => {
   const { id } = req.query;
 
   // 1. Fetch RSS feed
@@ -23,7 +25,6 @@ module.exports = async (req, res) => {
   for (const [link] of occurences) {
     if (toReplace.has(link)) continue;
     try {
-      // eslint-disable-next-line no-await-in-loop
       const { headers: { location } } = await request(link, { method: 'HEAD' });
       if (typeof location === 'string') {
         toReplace.set(link, location);
@@ -75,12 +76,10 @@ module.exports = async (req, res) => {
   }
 
   // 4. Return cleaned RSS
-  res
-    .status(200)
-    .setHeader('content-type', 'text/xml; charset=utf-8')
-    .send(text);
+  res.status(200);
+  res.setHeader('content-type', 'text/xml; charset=utf-8');
+  res.end(text);
 };
-		.send(text)
-}
 
-export default handler
+// Export for Vercel
+module.exports = handler;

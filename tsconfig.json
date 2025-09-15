@@ -1,3 +1,12 @@
 {
-	"extends": "@total-typescript/tsconfig/bundler/no-dom/app"
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false, 
+    "esModuleInterop": true,
+    "strict": true,
+    "skipLibCheck": true
+  }
 }

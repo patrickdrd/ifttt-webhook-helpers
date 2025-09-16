@@ -1,11 +1,11 @@
-const { request } = require('undici');
+import { request } from 'undici';
 
 const DOMAINS = [
   't.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly',
   'rebrand.ly', 'is.gd', 'soo.gd', 's.id', 'cutt.ly'
 ];
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const { id } = req.query;
 
   // 1. Fetch RSS feed
@@ -32,33 +32,29 @@ module.exports = async function handler(req, res) {
   }
 
   // 3. Remove duplicate pic.twitter.com images
-  try {
-    const imageUrls = new Set();
-    const imgRegex = /<(?:enclosure|media:content)[^>]+url="([^"]+)"/g;
-    let match;
-    while ((match = imgRegex.exec(text)) !== null) {
-      imageUrls.add(match[1].split('?')[0]);
-    }
-
-    text = text.replace(/<description><!\[CDATA\[(.*?)\]\]><\/description>/gs, (_, inner) => {
-      let cleaned = inner;
-      const aRegex = /<a [^>]*href="https:\/\/pic\.twitter\.com\/[^"]+"[^>]*>(.*?)<\/a>/gs;
-      cleaned = cleaned.replace(aRegex, full => {
-        const imgMatch = full.match(/<img [^>]*src="([^"]+)"/);
-        if (imgMatch && imageUrls.has(imgMatch[1].split('?')[0])) {
-          return '';
-        }
-        return full;
-      });
-      return `<description><![CDATA[${cleaned}]]></description>`;
-    });
-  } catch (err) {
-    console.error('Duplicate cleaner error:', err);
+  const imageUrls = new Set();
+  const imgRegex = /<(?:enclosure|media:content)[^>]+url="([^"]+)"/g;
+  let match;
+  while ((match = imgRegex.exec(text)) !== null) {
+    imageUrls.add(match[1].split('?')[0]);
   }
+
+  text = text.replace(/<description><!\[CDATA\[(.*?)\]\]><\/description>/gs, (_, inner) => {
+    let cleaned = inner;
+    const aRegex = /<a [^>]*href="https:\/\/pic\.twitter\.com\/[^"]+"[^>]*>(.*?)<\/a>/gs;
+    cleaned = cleaned.replace(aRegex, full => {
+      const imgMatch = full.match(/<img [^>]*src="([^"]+)"/);
+      if (imgMatch && imageUrls.has(imgMatch[1].split('?')[0])) {
+        return '';
+      }
+      return full;
+    });
+    return `<description><![CDATA[${cleaned}]]></description>`;
+  });
 
   // 4. Return cleaned RSS
   res
     .status(200)
     .setHeader('content-type', 'text/xml; charset=utf-8')
     .send(text);
-};
+}

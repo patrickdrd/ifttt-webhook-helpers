@@ -1,71 +1,85 @@
-// api/rss-app.mjs
 import { request } from 'undici'
+import { JSDOM } from 'jsdom'
 
-const DOMAINS = [
-  't.co',
-  'bit.ly',
-  'tinyurl.com',
-  'goo.gl',
-  'ow.ly',
-  'buff.ly',
-  'rebrand.ly',
-  'is.gd',
-  'soo.gd',
-  's.id',
-  'cutt.ly'
+const SHORTENER_DOMAINS = [
+  't.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly',
+  'rebrand.ly', 'is.gd', 'soo.gd', 's.id', 'cutt.ly'
 ]
 
 export default async function handler(req, res) {
-  let text = ''
   try {
-    const body = await getBody(req)
-    text = body?.text || ''
-  } catch {
-    res.status(400).json({ error: 'Invalid JSON body' })
-    return
+    const { id } = req.query
+    if (!id) {
+      res.status(400).json({ error: 'Missing id parameter' })
+      return
+    }
+
+    // 1. Fetch RSS feed
+    const { body } = await request(`https://rss.app/feeds/${id}`)
+    let text = await body.text()
+
+    // 2. Resolve shortener links in parallel
+    const domainsRegex = SHORTENER_DOMAINS.map(d => d.replace(/\./g, '\\.')).join('|')
+    const matches = [...text.matchAll(new RegExp(`https?://(?:${domainsRegex})/[\\w\\d-_]+`, 'gi'))]
+    const uniqueLinks = [...new Set(matches.map(([url]) => url))]
+
+    const results = await Promise.all(
+      uniqueLinks.map(async url => {
+        try {
+          const { headers: { location } } = await request(url, { method: 'HEAD' })
+          return [url, location || url]
+        } catch {
+          return [url, url]
+        }
+      })
+    )
+
+    for (const [short, resolved] of results) {
+      text = text.replaceAll(short, resolved)
+    }
+
+    // 3. Remove duplicate pic.twitter.com images
+    try {
+      const dom = new JSDOM(text, { contentType: 'text/xml' })
+      const doc = dom.window.document
+
+      doc.querySelectorAll('item').forEach(item => {
+        const seen = new Set()
+
+        // Collect images from <enclosure> and <media:content>
+        item.querySelectorAll('enclosure, media\\:content').forEach(node => {
+          const url = node.getAttribute('url')
+          if (url) seen.add(url.split('?')[0])
+        })
+
+        const descNode = item.querySelector('description')
+        if (descNode && descNode.textContent) {
+          const descDom = new JSDOM(descNode.textContent)
+          const descDoc = descDom.window.document
+
+          descDoc.querySelectorAll('a[href*="pic.twitter.com"]').forEach(link => {
+            const img = link.querySelector('img')
+            if (img && seen.has(img.src.split('?')[0])) {
+              link.remove()
+            }
+          })
+
+          descNode.textContent = descDoc.body.innerHTML
+        }
+      })
+
+      text = dom.serialize()
+    } catch (err) {
+      console.error('Duplicate pic.twitter.com cleaner error:', err)
+    }
+
+    // 4. Return cleaned RSS
+    res
+      .status(200)
+      .setHeader('Content-Type', 'text/xml; charset=utf-8')
+      .send(text)
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Internal server error' })
   }
-
-  // Match all shortener links
-  const domainsGroup = DOMAINS.map(d => d.replace(/\./g, '\\.')).join('|')
-  const occurences = Array.from(
-    text.matchAll(new RegExp(`https?://(?:${domainsGroup})/[\\w\\d-_]+`, 'gi'))
-  )
-
-  const uniqueLinks = [...new Set(occurences.map(([link]) => link))]
-
-  // Resolve all in parallel
-  const results = await Promise.all(
-    uniqueLinks.map(async link => {
-      try {
-        const {
-          headers: { location }
-        } = await request(link, { method: 'HEAD' })
-        return [link, typeof location === 'string' ? location : link]
-      } catch {
-        return [link, link]
-      }
-    })
-  )
-
-  for (const [short, resolved] of results) {
-    text = text.replaceAll(short, resolved)
-  }
-
-  res.status(200).json({ text })
-}
-
-// Helper: parse body from Node's req stream
-async function getBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = ''
-    req.on('data', chunk => (data += chunk))
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(data || '{}'))
-      } catch (err) {
-        reject(err)
-      }
-    })
-    req.on('error', reject)
-  })
 }

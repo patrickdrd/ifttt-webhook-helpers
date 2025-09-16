@@ -31,26 +31,7 @@ export default async function handler(req, res) {
     text = text.replace(new RegExp(link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), resolvedUrl);
   }
 
-  // 3. Remove duplicate pic.twitter.com images
-  const imageUrls = new Set();
-  const imgRegex = /<(?:enclosure|media:content)[^>]+url="([^"]+)"/g;
-  let match;
-  while ((match = imgRegex.exec(text)) !== null) {
-    imageUrls.add(match[1].split('?')[0]);
-  }
 
-  text = text.replace(/<description><!\[CDATA\[(.*?)\]\]><\/description>/gs, (_, inner) => {
-    let cleaned = inner;
-    const aRegex = /<a [^>]*href="https:\/\/pic\.twitter\.com\/[^"]+"[^>]*>(.*?)<\/a>/gs;
-    cleaned = cleaned.replace(aRegex, full => {
-      const imgMatch = full.match(/<img [^>]*src="([^"]+)"/);
-      if (imgMatch && imageUrls.has(imgMatch[1].split('?')[0])) {
-        return '';
-      }
-      return full;
-    });
-    return `<description><![CDATA[${cleaned}]]></description>`;
-  });
 
   // 4. Return cleaned RSS
   res

@@ -1,4 +1,4 @@
-import type { VercelApiHandler } from '@vercel/node'
+// api/rss-app.mjs
 import { request } from 'undici'
 
 const DOMAINS = [
@@ -15,39 +15,57 @@ const DOMAINS = [
   'cutt.ly'
 ]
 
-const handler: VercelApiHandler = async (req, res) => {
-  let { text = '' } = req.body as { text: string }
+export default async function handler(req, res) {
+  let text = ''
+  try {
+    const body = await getBody(req)
+    text = body?.text || ''
+  } catch {
+    res.status(400).json({ error: 'Invalid JSON body' })
+    return
+  }
 
-  // 1. Match all shortener links
+  // Match all shortener links
   const domainsGroup = DOMAINS.map(d => d.replace(/\./g, '\\.')).join('|')
   const occurences = Array.from(
     text.matchAll(new RegExp(`https?://(?:${domainsGroup})/[\\w\\d-_]+`, 'gi'))
   )
 
-  // 2. Deduplicate
   const uniqueLinks = [...new Set(occurences.map(([link]) => link))]
 
-  // 3. Resolve all links in parallel
+  // Resolve all in parallel
   const results = await Promise.all(
     uniqueLinks.map(async link => {
       try {
         const {
           headers: { location }
         } = await request(link, { method: 'HEAD' })
-        return [link, typeof location === 'string' ? location : link] as const
+        return [link, typeof location === 'string' ? location : link]
       } catch {
-        return [link, link] as const
+        return [link, link]
       }
     })
   )
 
-  // 4. Replace all in text
   for (const [short, resolved] of results) {
     text = text.replaceAll(short, resolved)
   }
 
-  // 5. Return
   res.status(200).json({ text })
 }
 
-export default handler
+// Helper: parse body from Node's req stream
+async function getBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    req.on('data', chunk => (data += chunk))
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(data || '{}'))
+      } catch (err) {
+        reject(err)
+      }
+    })
+    req.on('error', reject)
+  })
+}

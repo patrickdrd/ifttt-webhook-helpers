@@ -232,7 +232,11 @@ const handler: VercelApiHandler = async (req, res) => {
     resultText = resultText.replaceAll(original, final)
   }
 
-  res.status(200).json({ text: resultText, stats })
+  // Πριν το τελικό response
+  console.log('Stats object:', JSON.stringify(stats))
+  console.log('Response size:', JSON.stringify({ text: resultText, stats }).length)
+		
+	res.status(200).json({ text: resultText, stats })
 }
 
 export default handler

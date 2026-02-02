@@ -110,7 +110,7 @@ async function resolveUrl(url: string): Promise<{ final: string; fromCache: bool
       
       if (statusCode >= 300 && statusCode < 400 && location) {
         // Resolve relative URLs
-        currentUrl = new URL(location, currentUrl).href
+        currentUrl = new URL(location as string, currentUrl).href
       } else {
         // No more redirects
         finalUrl = currentUrl

@@ -204,11 +204,15 @@ export default async function handler(req, res) {
     console.log('URLs to replace:', Array.from(toReplace.entries()));
     console.log('Stats:', JSON.stringify(stats));
 
-    for (const [original, final] of toReplace) {
-      const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const replaceRegex = new RegExp(escapedOriginal, 'g');
-      text = text.replace(replaceRegex, final);
-    }
+		for (const [original, final] of toReplace) {
+		  const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		  const replaceRegex = new RegExp(escapedOriginal, 'g');
+		  
+		  // XML-escape το final URL (& → &amp;)
+		  const xmlSafeFinal = final.replace(/&/g, '&amp;');
+		  
+		  text = text.replace(replaceRegex, xmlSafeFinal);
+		}
 
     console.log('Final RSS size (bytes):', text.length);
     console.log('=== RSS PROXY END ===');

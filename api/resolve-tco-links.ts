@@ -180,19 +180,22 @@ const handler: VercelApiHandler = async (req, res) => {
     return res.status(400).json({ error: 'Text is required' })
   }
 
-  // URLs σε plaintext
+  // Pre-process: Αφαίρεσε escaped quotes για να δουλέψουν τα regex
+  let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'")
+
+  // ΒΗΜΑ 1: URLs σε plaintext
   const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?)]/gi
-  const plaintextMatches = text.match(urlRegex) || []
+  const plaintextMatches = processedText.match(urlRegex) || []
   
-  // URLs μέσα σε HTML attributes
+  // ΒΗΜΑ 2: URLs μέσα σε HTML attributes
   const attributeRegex = /(?:href|src|data-[a-z-]+|content|cite|poster|action)=["'](https?:\/\/[^"']+)["']/gi
-  const attributeMatches = [...text.matchAll(attributeRegex)].map(m => m[1])
+  const attributeMatches = [...processedText.matchAll(attributeRegex)].map(m => m[1])
   
-  // URLs χωρίς quotes
+  // ΒΗΜΑ 3: URLs χωρίς quotes
   const unquotedRegex = /(?:href|src)=(https?:\/\/[^\s>]+)/gi
-  const unquotedMatches = [...text.matchAll(unquotedRegex)].map(m => m[1])
+  const unquotedMatches = [...processedText.matchAll(unquotedRegex)].map(m => m[1])
   
-  // Συνδύασε όλα
+  // ΒΗΜΑ 4: Συνδύασε όλα
   const allMatches = [...plaintextMatches, ...attributeMatches, ...unquotedMatches]
   const uniqueUrls = [...new Set(allMatches)]
 
@@ -229,7 +232,7 @@ const handler: VercelApiHandler = async (req, res) => {
     }
   })
 
-  // Replace URLs παντού
+  // Replace URLs στο ΑΡΧΙΚΟ text (όχι processedText)
   let resultText = text
   for (const [original, final] of toReplace) {
     const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -240,11 +243,11 @@ const handler: VercelApiHandler = async (req, res) => {
   const responseObject = { text: resultText, stats }
   
   console.log('=== DEBUG INFO ===')
-	console.log('Unique URLs found:', uniqueUrls)
-	console.log('URLs to replace:', Array.from(toReplace.entries()))
-	console.log('Stats object:', JSON.stringify(stats))
-	console.log('Response size (bytes):', JSON.stringify(responseObject).length)
-	console.log('==================')
+  console.log('Unique URLs found:', uniqueUrls)
+  console.log('URLs to replace:', Array.from(toReplace.entries()))
+  console.log('Stats object:', JSON.stringify(stats))
+  console.log('Response size (bytes):', JSON.stringify(responseObject).length)
+  console.log('==================')
     
   res.status(200).json(responseObject)
 }

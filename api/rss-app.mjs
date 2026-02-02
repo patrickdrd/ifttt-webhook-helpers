@@ -33,12 +33,13 @@ const urlCache = new Map();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 function getCachedUrl(url) {
-  const cached = urlCache.get(url);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.url;
-  }
-  urlCache.delete(url);
-  return null;
+  return null; // FORCE DISABLE
+  // const cached = urlCache.get(url);
+  // if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  //   return cached.url;
+  // }
+  // urlCache.delete(url);
+  // return null;
 }
 
 function setCachedUrl(original, resolved) {
@@ -99,8 +100,12 @@ function cleanUrl(urlString) {
 
 async function resolveUrl(url) {
   const cached = getCachedUrl(url);
-  if (cached) return { final: cached, fromCache: true };
+  if (cached) {
+    console.log(`[CACHE HIT] ${url} -> ${cached}`);
+    return { final: cached, fromCache: true };
+  }
 
+	console.log(`[RESOLVE START] ${url}`);
   let finalUrl = url;
   let currentUrl = url;
   
@@ -116,19 +121,23 @@ async function resolveUrl(url) {
       const statusCode = response.statusCode;
       const location = response.headers.location;
       
-      if (statusCode >= 300 && statusCode < 400 && location) {
+      console.log(`[REDIRECT ${i}] Status: ${statusCode}, Location: ${location || 'none'}`);
+			
+			if (statusCode >= 300 && statusCode < 400 && location) {
         currentUrl = new URL(location, currentUrl).href;
       } else {
         finalUrl = currentUrl;
         break;
       }
     } catch {
+			console.log(`[RESOLVE ERROR] ${err.message}`);
       finalUrl = currentUrl;
       break;
     }
   }
   
   finalUrl = cleanUrl(finalUrl);
+	console.log(`[RESOLVE END] ${url} -> ${finalUrl}`);
   setCachedUrl(url, finalUrl);
   
   return { final: finalUrl, fromCache: false };

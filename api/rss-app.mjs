@@ -1,5 +1,15 @@
 import { request } from 'undici';
 
+const SKIP_DOMAINS = [
+  'www.w3.org',           // W3C standards
+  'purl.org',             // Persistent URLs / Dublin Core
+  'web.resource.org',     // RSS module namespaces
+  'schemas.xmlsoap.org',  // SOAP schemas
+  'xmlns.com',            // XML namespaces
+  'rdf.data-vocabulary.org'
+];
+
+
 // TRACKING PARAMS
 const TRACKING_PARAMS = [
   'ref_src', 'ref_url', 'tw', 's',
@@ -82,6 +92,18 @@ function cleanUrl(urlString) {
     return urlString;
   }
 }
+
+const uniqueUrls = [...new Set(allMatches)].filter(url => {
+  try {
+    const hostname = new URL(url).hostname;
+    // Skip namespace/schema URLs
+    return !SKIP_DOMAINS.some(domain => hostname.endsWith(domain));
+  } catch {
+    return true; // Keep malformed URLs for processing
+  }
+});
+
+console.log('URLs after filtering namespaces:', uniqueUrls);
 
 async function resolveUrl(url) {
   const cached = getCachedUrl(url);

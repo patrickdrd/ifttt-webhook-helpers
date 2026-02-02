@@ -132,7 +132,7 @@ export default async function handler(req, res) {
     console.log('=== RSS PROXY START ===');
     console.log('Feed ID:', id);
     
-    const { body } = await request(`https://rss.app/feeds/${id}.xml`);
+    const { body } = await request(`https://rss.app/feeds/${id}`);
     let text = await body.text();
     
     console.log('Original RSS size (bytes):', text.length);

@@ -129,7 +129,7 @@ async function resolveUrl(url: string): Promise<{ final: string; fromCache: bool
 // Rate limiting
 const requestCounts = new Map<string, { count: number; resetTime: number }>()
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000
-const RATE_LIMIT_MAX = 100
+const RATE_LIMIT_MAX = 1000
 
 function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
   const now = Date.now()

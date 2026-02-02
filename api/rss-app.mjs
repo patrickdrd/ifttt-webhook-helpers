@@ -1,5 +1,5 @@
 import { request } from 'undici';
-import { modifyXml } from '../lib/modifyXml.ts'
+import { modifyXml } from '../lib/modifyXml.js'
 
 // Domains to skip (XML namespaces, schemas, etc.)
 const SKIP_DOMAINS = [

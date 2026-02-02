@@ -1,9 +1,6 @@
 import { request } from 'undici';
 
-// Import functions από το resolve-tco-links
-import { cleanUrl, resolveUrl, urlCache, setCachedUrl, getCachedUrl } from './resolve-tco-links.js';
-
-// ΟΛΑ ΤΑ TRACKING PARAMS + DOMAINS
+// TRACKING PARAMS
 const TRACKING_PARAMS = [
   'ref_src', 'ref_url', 'tw', 's',
   'fbclid', 'fb_action_ids', 'fb_action_types', 'fb_source', 'fb_ref',
@@ -127,14 +124,19 @@ export default async function handler(req, res) {
   const { id } = req.query;
 
   try {
+    console.log('=== RSS PROXY START ===');
+    console.log('Feed ID:', id);
+    
     // 1. Fetch RSS feed
     const { body } = await request(`https://rss.app/feeds/${id}.xml`);
     let text = await body.text();
+    
+    console.log('Original RSS size (bytes):', text.length);
 
     // 2. Pre-process: Remove escaped quotes
     let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'");
 
-    // 3. Extract ALL URLs (plaintext + HTML attributes)
+    // 3. Extract ALL URLs
     const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?)]/gi;
     const plaintextMatches = processedText.match(urlRegex) || [];
     
@@ -144,7 +146,7 @@ export default async function handler(req, res) {
     const allMatches = [...plaintextMatches, ...attributeMatches];
     const uniqueUrls = [...new Set(allMatches)];
 
-    console.log(`[RSS Proxy] Found ${uniqueUrls.length} URLs to process`);
+    console.log('Unique URLs found:', uniqueUrls);
 
     // 4. Resolve all URLs in parallel
     const results = await Promise.allSettled(
@@ -152,7 +154,7 @@ export default async function handler(req, res) {
     );
 
     const toReplace = new Map();
-    let expanded = 0, cached = 0, failed = 0;
+    const stats = { totalLinks: uniqueUrls.length, expanded: 0, cleaned: 0, failed: 0, cached: 0 };
 
     results.forEach((result, i) => {
       const original = uniqueUrls[i];
@@ -160,18 +162,20 @@ export default async function handler(req, res) {
       if (result.status === 'fulfilled') {
         const { final, fromCache } = result.value;
         
-        if (fromCache) cached++;
+        if (fromCache) stats.cached++;
         
         if (final !== original) {
           toReplace.set(original, final);
-          expanded++;
+          stats.expanded++;
+          stats.cleaned++;
         }
       } else {
-        failed++;
+        stats.failed++;
       }
     });
 
-    console.log(`[RSS Proxy] Expanded: ${expanded}, Cached: ${cached}, Failed: ${failed}`);
+    console.log('URLs to replace:', Array.from(toReplace.entries()));
+    console.log('Stats:', JSON.stringify(stats));
 
     // 5. Replace URLs in original text
     for (const [original, final] of toReplace) {
@@ -179,6 +183,9 @@ export default async function handler(req, res) {
       const replaceRegex = new RegExp(escapedOriginal, 'g');
       text = text.replace(replaceRegex, final);
     }
+
+    console.log('Final RSS size (bytes):', text.length);
+    console.log('=== RSS PROXY END ===');
 
     // 6. Return cleaned RSS
     res
@@ -188,7 +195,9 @@ export default async function handler(req, res) {
       .send(text);
 
   } catch (error) {
-    console.error('[RSS Proxy] Error:', error);
+    console.error('=== RSS PROXY ERROR ===');
+    console.error('Error:', error.message);
+    console.error('Stack:', error.stack);
     res.status(500).json({ error: 'Failed to process RSS feed' });
   }
 }

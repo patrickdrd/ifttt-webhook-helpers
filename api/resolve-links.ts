@@ -1,95 +1,106 @@
-import { request } from 'undici';
+import type { VercelApiHandler } from '@vercel/node'
+import { request } from 'undici'
 
-// TRACKING PARAMS
+// Default shortener domains
+const DEFAULT_DOMAINS = [
+  't.co', 'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly',
+  'rebrand.ly', 'is.gd', 'soo.gd', 's.id', 'cutt.ly'
+]
+
+// Tracking parameters to remove
 const TRACKING_PARAMS = [
   'ref_src', 'ref_url', 'tw', 's',
   'fbclid', 'fb_action_ids', 'fb_action_types', 'fb_source', 'fb_ref',
   'gclid', 'gclsrc', 'dclid', 'gbraid', 'wbraid',
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
   'mc_cid', 'mc_eid', '_ga', 'msclkid', 'igshid', 'ref'
-];
+]
 
-const urlCache = new Map();
-const CACHE_TTL = 24 * 60 * 60 * 1000;
+// Simple cache
+const urlCache = new Map<string, { url: string; timestamp: number }>()
+const CACHE_TTL = 24 * 60 * 60 * 1000
 
-function getCachedUrl(url) {
-  const cached = urlCache.get(url);
+function getCachedUrl(url: string): string | null {
+  const cached = urlCache.get(url)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.url;
+    return cached.url
   }
-  urlCache.delete(url);
-  return null;
+  urlCache.delete(url)
+  return null
 }
 
-function setCachedUrl(original, resolved) {
+function setCachedUrl(original: string, resolved: string): void {
   if (urlCache.size > 1000) {
-    const firstKey = urlCache.keys().next().value;
-    if (firstKey) urlCache.delete(firstKey);
+    const firstKey = urlCache.keys().next().value
+    if (firstKey) urlCache.delete(firstKey)
   }
-  urlCache.set(original, { url: resolved, timestamp: Date.now() });
+  urlCache.set(original, { url: resolved, timestamp: Date.now() })
 }
 
-function cleanUrl(urlString) {
+function cleanUrl(urlString: string): string {
   try {
-    const url = new URL(urlString);
+    const url = new URL(urlString)
     
     // Remove tracking parameters
-    TRACKING_PARAMS.forEach(param => url.searchParams.delete(param));
+    TRACKING_PARAMS.forEach(param => url.searchParams.delete(param))
     
     // Remove utm_* pattern
-    const paramsToDelete = [];
+    const paramsToDelete: string[] = []
     url.searchParams.forEach((_, key) => {
-      if (/^utm_/i.test(key)) paramsToDelete.push(key);
-    });
-    paramsToDelete.forEach(param => url.searchParams.delete(param));
+      if (/^utm_/i.test(key)) paramsToDelete.push(key)
+    })
+    paramsToDelete.forEach(param => url.searchParams.delete(param))
     
     // Twitter/X normalization
     if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
-      url.hostname = 'x.com';
+      url.hostname = 'x.com'
     }
     
     // YouTube normalization
     if (url.hostname === 'youtu.be') {
-      const videoId = url.pathname.slice(1);
-      url.hostname = 'www.youtube.com';
-      url.pathname = '/watch';
-      url.search = '';
-      url.searchParams.set('v', videoId);
+      const videoId = url.pathname.slice(1)
+      url.hostname = 'www.youtube.com'
+      url.pathname = '/watch'
+      url.search = ''
+      url.searchParams.set('v', videoId)
     } else if (/youtube\.com$/.test(url.hostname)) {
-      const videoId = url.searchParams.get('v');
+      const videoId = url.searchParams.get('v')
       if (videoId) {
-        url.search = '';
-        url.searchParams.set('v', videoId);
+        url.search = ''
+        url.searchParams.set('v', videoId)
       }
     }
     
     // Amazon cleanup
     if (/amazon\.(com|gr|de|co\.uk|fr|it|es)$/.test(url.hostname)) {
-      const match = url.pathname.match(/\/dp\/([A-Z0-9]{10})/);
+      const match = url.pathname.match(/\/dp\/([A-Z0-9]{10})/)
       if (match) {
-        url.pathname = `/dp/${match[1]}`;
-        url.search = '';
+        url.pathname = `/dp/${match[1]}`
+        url.search = ''
       }
     }
     
     // Remove trailing slash
     if (url.pathname.endsWith('/') && url.pathname.length > 1) {
-      url.pathname = url.pathname.slice(0, -1);
+      url.pathname = url.pathname.slice(0, -1)
     }
     
-    return url.toString();
+    return url.toString()
   } catch {
-    return urlString;
+    return urlString
   }
 }
 
-async function resolveUrl(url) {
-  const cached = getCachedUrl(url);
-  if (cached) return { final: cached, fromCache: true };
+async function resolveUrl(url: string): Promise<{ final: string; fromCache: boolean }> {
+  const cached = getCachedUrl(url)
+  if (cached) {
+    return { final: cached, fromCache: true }
+  }
 
-  let finalUrl = url;
-  let currentUrl = url;
+  let finalUrl = url
+  let currentUrl = url
   
+  // Manual redirect tracking (max 5 hops)
   for (let i = 0; i < 5; i++) {
     try {
       const response = await request(currentUrl, { 
@@ -97,107 +108,109 @@ async function resolveUrl(url) {
         maxRedirections: 0,
         headersTimeout: 3000,
         bodyTimeout: 3000
-      });
+      })
       
-      const statusCode = response.statusCode;
-      const location = response.headers.location;
+      const statusCode = response.statusCode
+      const location = response.headers.location
       
       if (statusCode >= 300 && statusCode < 400 && location) {
-        currentUrl = new URL(location, currentUrl).href;
+        currentUrl = new URL(location as string, currentUrl).href
       } else {
-        finalUrl = currentUrl;
-        break;
+        finalUrl = currentUrl
+        break
       }
     } catch {
-      finalUrl = currentUrl;
-      break;
+      finalUrl = currentUrl
+      break
     }
   }
   
-  finalUrl = cleanUrl(finalUrl);
-  setCachedUrl(url, finalUrl);
+  finalUrl = cleanUrl(finalUrl)
+  setCachedUrl(url, finalUrl)
   
-  return { final: finalUrl, fromCache: false };
+  return { final: finalUrl, fromCache: false }
 }
 
-export default async function handler(req, res) {
-  const { id } = req.query;
+const handler: VercelApiHandler = async (req, res) => {
+  let { text = '', domains = [], cleanTracking = true } = req.body as {
+    text: string
+    domains?: string[]
+    cleanTracking?: boolean
+  }
 
-  try {
-    console.log('=== RSS PROXY START ===');
-    console.log('Feed ID:', id);
+  if (!text) {
+    return res.status(400).json({ error: 'Text is required' })
+  }
+
+  console.log('=== RESOLVE-LINKS START ===')
+
+  // Use default domains if none provided
+  const domainsToUse = domains.length > 0 ? domains : DEFAULT_DOMAINS
+  
+  // Pre-process: Remove escaped quotes
+  let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'")
+
+  // Build domain regex
+  const domainsGroup = domainsToUse.map(d => d.replace(/\./g, '\\.')).join('|')
+  const domainRegex = new RegExp(`https?://(?:${domainsGroup})/\\w+`, 'g')
+  const domainMatches = processedText.match(domainRegex) || []
+
+  // Also find URLs in HTML attributes
+  const attributeRegex = /(?:href|src|data-[a-z-]+|content)=["'](https?:\/\/[^"']+)["']/gi
+  const attributeMatches = [...processedText.matchAll(attributeRegex)].map(m => m[1])
+  
+  // Combine and deduplicate
+  const allMatches = [...domainMatches, ...attributeMatches]
+  const uniqueUrls = [...new Set(allMatches)]
+
+  console.log('Unique URLs found:', uniqueUrls)
+
+  if (uniqueUrls.length === 0) {
+    console.log('No URLs to process')
+    console.log('=== RESOLVE-LINKS END ===')
+    return res.json({ text, stats: { totalLinks: 0, expanded: 0, cleaned: 0, failed: 0, cached: 0 } })
+  }
+
+  // Resolve all URLs in parallel
+  const results = await Promise.allSettled(
+    uniqueUrls.map(url => resolveUrl(url))
+  )
+
+  const toReplace = new Map<string, string>()
+  const stats = { totalLinks: uniqueUrls.length, expanded: 0, cleaned: 0, failed: 0, cached: 0 }
+
+  results.forEach((result, i) => {
+    const original = uniqueUrls[i]
     
-    // 1. Fetch RSS feed
-    const { body } = await request(`https://rss.app/feeds/${id}.xml`);
-    let text = await body.text();
-    
-    console.log('Original RSS size (bytes):', text.length);
-
-    // 2. Pre-process: Remove escaped quotes
-    let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'");
-
-    // 3. Extract ALL URLs
-    const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?)]/gi;
-    const plaintextMatches = processedText.match(urlRegex) || [];
-    
-    const attributeRegex = /(?:href|src|data-[a-z-]+|content|cite|poster|action)=["'](https?:\/\/[^"']+)["']/gi;
-    const attributeMatches = [...processedText.matchAll(attributeRegex)].map(m => m[1]);
-    
-    const allMatches = [...plaintextMatches, ...attributeMatches];
-    const uniqueUrls = [...new Set(allMatches)];
-
-    console.log('Unique URLs found:', uniqueUrls);
-
-    // 4. Resolve all URLs in parallel
-    const results = await Promise.allSettled(
-      uniqueUrls.map(url => resolveUrl(url))
-    );
-
-    const toReplace = new Map();
-    const stats = { totalLinks: uniqueUrls.length, expanded: 0, cleaned: 0, failed: 0, cached: 0 };
-
-    results.forEach((result, i) => {
-      const original = uniqueUrls[i];
+    if (result.status === 'fulfilled') {
+      const { final, fromCache } = result.value
       
-      if (result.status === 'fulfilled') {
-        const { final, fromCache } = result.value;
-        
-        if (fromCache) stats.cached++;
-        
-        if (final !== original) {
-          toReplace.set(original, final);
-          stats.expanded++;
-          stats.cleaned++;
-        }
-      } else {
-        stats.failed++;
+      if (fromCache) stats.cached++
+      
+      if (final !== original) {
+        toReplace.set(original, final)
+        stats.expanded++
+        if (cleanTracking) stats.cleaned++
       }
-    });
-
-    console.log('URLs to replace:', Array.from(toReplace.entries()));
-    console.log('Stats:', JSON.stringify(stats));
-
-    // 5. Replace URLs in original text
-    for (const [original, final] of toReplace) {
-      const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const replaceRegex = new RegExp(escapedOriginal, 'g');
-      text = text.replace(replaceRegex, final);
+    } else {
+      stats.failed++
     }
+  })
 
-    console.log('Final RSS size (bytes):', text.length);
-    console.log('=== RSS PROXY END ===');
+  console.log('URLs to replace:', Array.from(toReplace.entries()))
+  console.log('Stats:', JSON.stringify(stats))
 
-    // 6. Return cleaned RSS
-    res
-      .status(200)
-      .setHeader('content-type', 'text/xml; charset=utf-8')
-      .setHeader('cache-control', 'public, max-age=300')
-      .send(text);
-
-  } catch (error) {
-    console.error('=== RSS PROXY ERROR ===');
-    console.error('Error:', error.message);
-    console.error('Stack:', error.stack);
-    res.status(500).json({ error: 'Failed to process RSS feed' });
+  // Replace URLs in original text
+  let resultText = text
+  for (const [original, final] of toReplace) {
+    const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const replaceRegex = new RegExp(escapedOriginal, 'g')
+    resultText = resultText.replace(replaceRegex, final)
   }
+
+  console.log('=== RESOLVE-LINKS END ===')
+
+  res.json({ text: resultText, stats })
 }
+
+export default handler

@@ -10,7 +10,7 @@
 		"lint:check": "tsc --noEmit"
 	},
 	"dependencies": {
-		"jsdom": "^27.0.0",
+		"jsdom": "^24.0.0",
 		"undici": "^7.16.0"
 	},
 	"devDependencies": {

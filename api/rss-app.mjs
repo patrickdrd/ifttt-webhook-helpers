@@ -8,6 +8,7 @@ const SKIP_DOMAINS = [
   'schemas.xmlsoap.org',
   'xmlns.com',
   'rdf.data-vocabulary.org',
+	'search.yahoo.com',
   'rss.app',  // Αγνόησε και το rss.app feed URL
   // Twitter - skip ALL Twitter URLs
   'twitter.com',

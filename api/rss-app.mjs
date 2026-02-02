@@ -110,7 +110,7 @@ async function resolveUrl(url) {
     return { final: cached, fromCache: true };
   }
 
-	console.log(`[RESOLVE START] ${url}`);
+//	console.log(`[RESOLVE START] ${url}`);
   let finalUrl = url;
   let currentUrl = url;
   
@@ -126,7 +126,7 @@ async function resolveUrl(url) {
       const statusCode = response.statusCode;
       const location = response.headers.location;
       
-      console.log(`[REDIRECT ${i}] Status: ${statusCode}, Location: ${location || 'none'}`);
+//      console.log(`[REDIRECT ${i}] Status: ${statusCode}, Location: ${location || 'none'}`);
 			
 			if (statusCode >= 300 && statusCode < 400 && location) {
         currentUrl = new URL(location, currentUrl).href;
@@ -142,7 +142,7 @@ async function resolveUrl(url) {
   }
   
   finalUrl = cleanUrl(finalUrl);
-	console.log(`[RESOLVE END] ${url} -> ${finalUrl}`);
+//	console.log(`[RESOLVE END] ${url} -> ${finalUrl}`);
   setCachedUrl(url, finalUrl);
   
   return { final: finalUrl, fromCache: false };
@@ -191,7 +191,7 @@ export default async function handler(req, res) {
     
     const uniqueUrls = [...new Set(filteredUrls)];
 
-    console.log('Unique URLs found (after filtering):', uniqueUrls);
+//    console.log('Unique URLs found (after filtering):', uniqueUrls);
 
     if (uniqueUrls.length === 0) {
       console.log('No URLs to process');

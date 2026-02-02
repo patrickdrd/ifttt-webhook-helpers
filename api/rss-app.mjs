@@ -1,14 +1,15 @@
 import { request } from 'undici';
 
+// Domains to skip (XML namespaces, schemas, etc.)
 const SKIP_DOMAINS = [
-  'www.w3.org',           // W3C standards
-  'purl.org',             // Persistent URLs / Dublin Core
-  'web.resource.org',     // RSS module namespaces
-  'schemas.xmlsoap.org',  // SOAP schemas
-  'xmlns.com',            // XML namespaces
-  'rdf.data-vocabulary.org'
+  'www.w3.org',
+  'purl.org',
+  'web.resource.org',
+  'schemas.xmlsoap.org',
+  'xmlns.com',
+  'rdf.data-vocabulary.org',
+  'rss.app'  // Αγνόησε και το rss.app feed URL
 ];
-
 
 // TRACKING PARAMS
 const TRACKING_PARAMS = [
@@ -43,22 +44,18 @@ function cleanUrl(urlString) {
   try {
     const url = new URL(urlString);
     
-    // Remove tracking parameters
     TRACKING_PARAMS.forEach(param => url.searchParams.delete(param));
     
-    // Remove utm_* pattern
     const paramsToDelete = [];
     url.searchParams.forEach((_, key) => {
       if (/^utm_/i.test(key)) paramsToDelete.push(key);
     });
     paramsToDelete.forEach(param => url.searchParams.delete(param));
     
-    // Twitter/X normalization
     if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
       url.hostname = 'x.com';
     }
     
-    // YouTube normalization
     if (url.hostname === 'youtu.be') {
       const videoId = url.pathname.slice(1);
       url.hostname = 'www.youtube.com';
@@ -73,7 +70,6 @@ function cleanUrl(urlString) {
       }
     }
     
-    // Amazon cleanup
     if (/amazon\.(com|gr|de|co\.uk|fr|it|es)$/.test(url.hostname)) {
       const match = url.pathname.match(/\/dp\/([A-Z0-9]{10})/);
       if (match) {
@@ -82,7 +78,6 @@ function cleanUrl(urlString) {
       }
     }
     
-    // Remove trailing slash
     if (url.pathname.endsWith('/') && url.pathname.length > 1) {
       url.pathname = url.pathname.slice(0, -1);
     }
@@ -92,18 +87,6 @@ function cleanUrl(urlString) {
     return urlString;
   }
 }
-
-const uniqueUrls = [...new Set(allMatches)].filter(url => {
-  try {
-    const hostname = new URL(url).hostname;
-    // Skip namespace/schema URLs
-    return !SKIP_DOMAINS.some(domain => hostname.endsWith(domain));
-  } catch {
-    return true; // Keep malformed URLs for processing
-  }
-});
-
-console.log('URLs after filtering namespaces:', uniqueUrls);
 
 async function resolveUrl(url) {
   const cached = getCachedUrl(url);
@@ -149,16 +132,14 @@ export default async function handler(req, res) {
     console.log('=== RSS PROXY START ===');
     console.log('Feed ID:', id);
     
-    // 1. Fetch RSS feed
     const { body } = await request(`https://rss.app/feeds/${id}.xml`);
     let text = await body.text();
     
     console.log('Original RSS size (bytes):', text.length);
 
-    // 2. Pre-process: Remove escaped quotes
     let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'");
 
-    // 3. Extract ALL URLs
+    // Extract URLs
     const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?)]/gi;
     const plaintextMatches = processedText.match(urlRegex) || [];
     
@@ -166,11 +147,35 @@ export default async function handler(req, res) {
     const attributeMatches = [...processedText.matchAll(attributeRegex)].map(m => m[1]);
     
     const allMatches = [...plaintextMatches, ...attributeMatches];
-    const uniqueUrls = [...new Set(allMatches)];
+    
+    // ΦΙΛΤΡΑΡΕ ΕΔΩ - μετά το allMatches definition
+    const filteredUrls = allMatches.filter(url => {
+      try {
+        const hostname = new URL(url).hostname;
+        const shouldSkip = SKIP_DOMAINS.some(domain => hostname.endsWith(domain));
+        if (shouldSkip) {
+          console.log('Skipping namespace/schema URL:', url);
+        }
+        return !shouldSkip;
+      } catch {
+        return true;
+      }
+    });
+    
+    const uniqueUrls = [...new Set(filteredUrls)];
 
-    console.log('Unique URLs found:', uniqueUrls);
+    console.log('Unique URLs found (after filtering):', uniqueUrls);
 
-    // 4. Resolve all URLs in parallel
+    if (uniqueUrls.length === 0) {
+      console.log('No URLs to process');
+      console.log('=== RSS PROXY END ===');
+      return res
+        .status(200)
+        .setHeader('content-type', 'text/xml; charset=utf-8')
+        .setHeader('cache-control', 'public, max-age=300')
+        .send(text);
+    }
+
     const results = await Promise.allSettled(
       uniqueUrls.map(url => resolveUrl(url))
     );
@@ -199,7 +204,6 @@ export default async function handler(req, res) {
     console.log('URLs to replace:', Array.from(toReplace.entries()));
     console.log('Stats:', JSON.stringify(stats));
 
-    // 5. Replace URLs in original text
     for (const [original, final] of toReplace) {
       const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const replaceRegex = new RegExp(escapedOriginal, 'g');
@@ -209,7 +213,6 @@ export default async function handler(req, res) {
     console.log('Final RSS size (bytes):', text.length);
     console.log('=== RSS PROXY END ===');
 
-    // 6. Return cleaned RSS
     res
       .status(200)
       .setHeader('content-type', 'text/xml; charset=utf-8')

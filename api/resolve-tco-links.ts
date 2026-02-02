@@ -179,7 +179,7 @@ const handler: VercelApiHandler = async (req, res) => {
     })
   }
 
-  const { text = '', cleanTracking = true } = req.body as { 
+  const { text = '', cleanTracking = true } = (req.body || {}) as {
     text: string
     cleanTracking?: boolean
   }

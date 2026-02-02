@@ -1,4 +1,5 @@
 import { request } from 'undici';
+import { modifyXml } from '../lib/modifyXml'
 
 // Domains to skip (XML namespaces, schemas, etc.)
 const SKIP_DOMAINS = [
@@ -157,7 +158,8 @@ export default async function handler(req, res) {
     
     const { body } = await request(`https://rss.app/feeds/${id}`);
     let text = await body.text();
-    
+    text = modifyXml(text, 'enclosure')
+		
     console.log('Original RSS size (bytes):', text.length);
 
     let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'");

@@ -100,7 +100,7 @@ async function resolveUrl(url: string): Promise<{ final: string; fromCache: bool
     try {
       const response = await request(currentUrl, { 
         method: 'HEAD',
-        maxRedirections: 0, // Don't auto-follow, we track manually
+        maxRedirections: 0,
         headersTimeout: 5000,
         bodyTimeout: 5000
       })
@@ -109,24 +109,18 @@ async function resolveUrl(url: string): Promise<{ final: string; fromCache: bool
       const location = response.headers.location
       
       if (statusCode >= 300 && statusCode < 400 && location) {
-        // Resolve relative URLs
         currentUrl = new URL(location as string, currentUrl).href
       } else {
-        // No more redirects
         finalUrl = currentUrl
         break
       }
     } catch {
-      // Network error - use last successful URL
       finalUrl = currentUrl
       break
     }
   }
   
-  // Clean tracking params
   finalUrl = cleanUrl(finalUrl)
-  
-  // Cache result
   setCachedUrl(url, finalUrl)
   
   return { final: finalUrl, fromCache: false }
@@ -140,7 +134,6 @@ const RATE_LIMIT_MAX = 100
 function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
   const now = Date.now()
   
-  // Cleanup old entries periodically
   if (requestCounts.size > 5000) {
     for (const [key, record] of requestCounts) {
       if (now > record.resetTime) requestCounts.delete(key)
@@ -163,7 +156,6 @@ function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
 }
 
 const handler: VercelApiHandler = async (req, res) => {
-  // Rate limiting
   const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || 
              req.headers['x-real-ip'] as string || 
              'unknown'
@@ -188,10 +180,21 @@ const handler: VercelApiHandler = async (req, res) => {
     return res.status(400).json({ error: 'Text is required' })
   }
 
-  // URL regex - αποφεύγει trailing punctuation
+  // URLs σε plaintext
   const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?)]/gi
-  const matches = text.match(urlRegex) || []
-  const uniqueUrls = [...new Set(matches)]
+  const plaintextMatches = text.match(urlRegex) || []
+  
+  // URLs μέσα σε HTML attributes
+  const attributeRegex = /(?:href|src|data-[a-z-]+|content|cite|poster|action)=["'](https?:\/\/[^"']+)["']/gi
+  const attributeMatches = [...text.matchAll(attributeRegex)].map(m => m[1])
+  
+  // URLs χωρίς quotes
+  const unquotedRegex = /(?:href|src)=(https?:\/\/[^\s>]+)/gi
+  const unquotedMatches = [...text.matchAll(unquotedRegex)].map(m => m[1])
+  
+  // Συνδύασε όλα
+  const allMatches = [...plaintextMatches, ...attributeMatches, ...unquotedMatches]
+  const uniqueUrls = [...new Set(allMatches)]
 
   if (uniqueUrls.length === 0) {
     return res.status(200).json({ 
@@ -226,21 +229,22 @@ const handler: VercelApiHandler = async (req, res) => {
     }
   })
 
-  // Replace URLs
+  // Replace URLs παντού
   let resultText = text
   for (const [original, final] of toReplace) {
-    resultText = resultText.replaceAll(original, final)
+    const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const replaceRegex = new RegExp(escapedOriginal, 'g')
+    resultText = resultText.replace(replaceRegex, final)
   }
 
-	const responseObject = { text: resultText, stats }
-	
+  const responseObject = { text: resultText, stats }
+  
   console.log('=== DEBUG INFO ===')
   console.log('Stats object:', JSON.stringify(stats))
-  console.log('Full response:', JSON.stringify(responseObject))
   console.log('Response size (bytes):', JSON.stringify(responseObject).length)
   console.log('==================')
-		
-	res.status(200).json({ text: resultText, stats })
+    
+  res.status(200).json(responseObject)
 }
 
 export default handler

@@ -240,9 +240,11 @@ const handler: VercelApiHandler = async (req, res) => {
   const responseObject = { text: resultText, stats }
   
   console.log('=== DEBUG INFO ===')
-  console.log('Stats object:', JSON.stringify(stats))
-  console.log('Response size (bytes):', JSON.stringify(responseObject).length)
-  console.log('==================')
+	console.log('Unique URLs found:', uniqueUrls)
+	console.log('URLs to replace:', Array.from(toReplace.entries()))
+	console.log('Stats object:', JSON.stringify(stats))
+	console.log('Response size (bytes):', JSON.stringify(responseObject).length)
+	console.log('==================')
     
   res.status(200).json(responseObject)
 }

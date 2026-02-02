@@ -1,6 +1,27 @@
 import type { VercelApiHandler } from '@vercel/node'
 import { request } from 'undici'
 
+// Domains to skip (XML namespaces, schemas, etc.)
+const SKIP_DOMAINS = [
+  'www.w3.org',
+  'purl.org',
+  'web.resource.org',
+  'schemas.xmlsoap.org',
+  'xmlns.com',
+  'rdf.data-vocabulary.org',
+	'search.yahoo.com',
+  'rss.app',  // Αγνόησε και το rss.app feed URL
+  // Twitter - skip ALL Twitter URLs
+  'twitter.com',
+  'x.com',
+  'pic.twitter.com',
+  'pic.x.com',
+  'pbs.twimg.com',
+  'abs.twimg.com',
+  'video.twimg.com',
+  'platform.twitter.com'
+];
+
 // Tracking parameters to remove
 const TRACKING_PARAMS = [
   'ref_src', 'ref_url', 'tw', 's',
@@ -14,13 +35,14 @@ const TRACKING_PARAMS = [
 const urlCache = new Map<string, { url: string; timestamp: number }>()
 const CACHE_TTL = 24 * 60 * 60 * 1000
 
-function getCachedUrl(url: string): string | null {
-  const cached = urlCache.get(url)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.url
-  }
-  urlCache.delete(url)
-  return null
+function getCachedUrl(url) {
+  return null; // FORCE DISABLE
+  // const cached = urlCache.get(url);
+  // if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  //   return cached.url;
+  // }
+  // urlCache.delete(url);
+  // return null;
 }
 
 function setCachedUrl(original: string, resolved: string): void {
@@ -197,6 +219,20 @@ const handler: VercelApiHandler = async (req, res) => {
   
   // ΒΗΜΑ 4: Συνδύασε όλα
   const allMatches = [...plaintextMatches, ...attributeMatches, ...unquotedMatches]
+
+	// ΦΙΛΤΡΑΡΕ με SKIP_DOMAINS
+	const filteredUrls = allMatches.filter(url => {
+	  try {
+	    const hostname = new URL(url).hostname;
+	    const shouldSkip = SKIP_DOMAINS.some(domain => {
+	      return hostname === domain || hostname.endsWith('.' + domain);
+	    });
+	    return !shouldSkip;
+	  } catch {
+	    return true;
+	  }
+	});
+	
   const uniqueUrls = [...new Set(allMatches)]
 
   if (uniqueUrls.length === 0) {
@@ -235,9 +271,13 @@ const handler: VercelApiHandler = async (req, res) => {
   // Replace URLs στο ΑΡΧΙΚΟ text (όχι processedText)
   let resultText = text
   for (const [original, final] of toReplace) {
-    const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const replaceRegex = new RegExp(escapedOriginal, 'g')
-    resultText = resultText.replace(replaceRegex, final)
+	  const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	  const replaceRegex = new RegExp(escapedOriginal, 'g')
+	  
+	  // XML-escape το final URL (& → &amp;)
+	  const xmlSafeFinal = final.replace(/&/g, '&amp;')
+	  
+	  resultText = resultText.replace(replaceRegex, xmlSafeFinal)
   }
 
   const responseObject = { text: resultText, stats }

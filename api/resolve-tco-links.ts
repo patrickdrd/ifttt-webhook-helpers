@@ -1,5 +1,5 @@
 import type { VercelApiHandler } from '@vercel/node'
-import { request, Agent, interceptors } from 'undici'
+import { request } from 'undici'
 
 // Tracking parameters to remove
 const TRACKING_PARAMS = [
@@ -9,11 +9,6 @@ const TRACKING_PARAMS = [
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
   'mc_cid', 'mc_eid', '_ga', 'msclkid', 'igshid', 'ref'
 ]
-
-// Agent με auto-redirect (το undici κάνει τη δουλειά)
-const agent = new Agent().compose(
-  interceptors.redirect({ maxRedirections: 10 })
-)
 
 // Simple cache
 const urlCache = new Map<string, { url: string; timestamp: number }>()
@@ -98,21 +93,34 @@ async function resolveUrl(url: string): Promise<{ final: string; fromCache: bool
   }
 
   let finalUrl = url
+  let currentUrl = url
   
-  try {
-    // Agent handles redirects automatically, just get final URL
-    const response = await request(url, { 
-      method: 'HEAD',
-      dispatcher: agent,
-      headersTimeout: 5000,
-      bodyTimeout: 5000
-    })
-    
-    // response.context.history contains redirect chain, τελευταίο = final
-    // Αλλά πιο απλά: το response URL είναι το final
-    finalUrl = response.context?.history?.at(-1)?.toString() || url
-  } catch {
-    // Network error - keep original
+  // Manual redirect tracking (max 10 hops)
+  for (let i = 0; i < 10; i++) {
+    try {
+      const response = await request(currentUrl, { 
+        method: 'HEAD',
+        maxRedirections: 0, // Don't auto-follow, we track manually
+        headersTimeout: 5000,
+        bodyTimeout: 5000
+      })
+      
+      const statusCode = response.statusCode
+      const location = response.headers.location
+      
+      if (statusCode >= 300 && statusCode < 400 && location) {
+        // Resolve relative URLs
+        currentUrl = new URL(location, currentUrl).href
+      } else {
+        // No more redirects
+        finalUrl = currentUrl
+        break
+      }
+    } catch {
+      // Network error - use last successful URL
+      finalUrl = currentUrl
+      break
+    }
   }
   
   // Clean tracking params

@@ -158,18 +158,22 @@ export default async function handler(req, res) {
     const allMatches = [...plaintextMatches, ...attributeMatches];
     
     // ΦΙΛΤΡΑΡΕ ΕΔΩ - μετά το allMatches definition
-    const filteredUrls = allMatches.filter(url => {
-      try {
-        const hostname = new URL(url).hostname;
-        const shouldSkip = SKIP_DOMAINS.some(domain => hostname.endsWith(domain));
-        if (shouldSkip) {
-          console.log('Skipping namespace/schema URL:', url);
-        }
-        return !shouldSkip;
-      } catch {
-        return true;
-      }
-    });
+		const filteredUrls = allMatches.filter(url => {
+		  try {
+		    const hostname = new URL(url).hostname;
+		    const shouldSkip = SKIP_DOMAINS.some(domain => {
+		      // Exact match ή subdomain
+		      return hostname === domain || hostname.endsWith('.' + domain);
+		    });
+		    if (shouldSkip) {
+//		      console.log('Skipping namespace/schema URL:', url);
+		    }
+		    return !shouldSkip;
+		  } catch {
+		    return true;
+		  }
+		});
+
     
     const uniqueUrls = [...new Set(filteredUrls)];
 

@@ -1,62 +1,230 @@
 import type { VercelApiHandler } from '@vercel/node'
-import { request } from 'undici'
+import { request, Agent, interceptors } from 'undici'
 
-// Known shorteners list
-const DOMAINS = [
-  't.co',
-  'bit.ly',
-  'tinyurl.com',
-  'goo.gl',
-  'ow.ly',
-  'buff.ly',
-  'rebrand.ly',
-  'is.gd',
-  'soo.gd',
-  's.id',
-  'cutt.ly',
-  'shorte.st',
-  'adf.ly',
-  'lnkd.in',
-  'trib.al',
-  'bl.ink',
-  'po.st',
-  'mcaf.ee'
+// Tracking parameters to remove
+const TRACKING_PARAMS = [
+  'ref_src', 'ref_url', 'tw', 's',
+  'fbclid', 'fb_action_ids', 'fb_action_types', 'fb_source', 'fb_ref',
+  'gclid', 'gclsrc', 'dclid', 'gbraid', 'wbraid',
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'mc_cid', 'mc_eid', '_ga', 'msclkid', 'igshid', 'ref'
 ]
 
-const handler: VercelApiHandler = async (req, res) => {
-  let { text = '' } = req.body as { text: string }
+// Agent με auto-redirect (το undici κάνει τη δουλειά)
+const agent = new Agent().compose(
+  interceptors.redirect({ maxRedirections: 10 })
+)
 
-  // Build a regex that matches all known shortener links
-  const domainsGroup = DOMAINS.map(d => d.replace(/\./g, '\\.')).join('|')
-  const occurences = text.matchAll(
-    new RegExp(`https?://(?:${domainsGroup})/[\\w\\d-_]+`, 'gi')
+// Simple cache
+const urlCache = new Map<string, { url: string; timestamp: number }>()
+const CACHE_TTL = 24 * 60 * 60 * 1000
+
+function getCachedUrl(url: string): string | null {
+  const cached = urlCache.get(url)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.url
+  }
+  urlCache.delete(url)
+  return null
+}
+
+function setCachedUrl(original: string, resolved: string): void {
+  if (urlCache.size > 1000) {
+    const firstKey = urlCache.keys().next().value
+    if (firstKey) urlCache.delete(firstKey)
+  }
+  urlCache.set(original, { url: resolved, timestamp: Date.now() })
+}
+
+function cleanUrl(urlString: string): string {
+  try {
+    const url = new URL(urlString)
+    
+    // Remove tracking parameters
+    TRACKING_PARAMS.forEach(param => url.searchParams.delete(param))
+    
+    // Remove utm_* pattern
+    const paramsToDelete: string[] = []
+    url.searchParams.forEach((_, key) => {
+      if (/^utm_/i.test(key)) paramsToDelete.push(key)
+    })
+    paramsToDelete.forEach(param => url.searchParams.delete(param))
+    
+    // Twitter/X normalization
+    if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
+      url.hostname = 'x.com'
+    }
+    
+    // YouTube normalization
+    if (url.hostname === 'youtu.be') {
+      const videoId = url.pathname.slice(1)
+      url.hostname = 'www.youtube.com'
+      url.pathname = '/watch'
+      url.search = ''
+      url.searchParams.set('v', videoId)
+    } else if (/youtube\.com$/.test(url.hostname)) {
+      const videoId = url.searchParams.get('v')
+      if (videoId) {
+        url.search = ''
+        url.searchParams.set('v', videoId)
+      }
+    }
+    
+    // Amazon cleanup - keep only ASIN
+    if (/amazon\.(com|gr|de|co\.uk|fr|it|es)$/.test(url.hostname)) {
+      const match = url.pathname.match(/\/dp\/([A-Z0-9]{10})/)
+      if (match) {
+        url.pathname = `/dp/${match[1]}`
+        url.search = ''
+      }
+    }
+    
+    // Remove trailing slash
+    if (url.pathname.endsWith('/') && url.pathname.length > 1) {
+      url.pathname = url.pathname.slice(0, -1)
+    }
+    
+    return url.toString()
+  } catch {
+    return urlString
+  }
+}
+
+async function resolveUrl(url: string): Promise<{ final: string; fromCache: boolean }> {
+  // Check cache first
+  const cached = getCachedUrl(url)
+  if (cached) {
+    return { final: cached, fromCache: true }
+  }
+
+  let finalUrl = url
+  
+  try {
+    // Agent handles redirects automatically, just get final URL
+    const response = await request(url, { 
+      method: 'HEAD',
+      dispatcher: agent,
+      headersTimeout: 5000,
+      bodyTimeout: 5000
+    })
+    
+    // response.context.history contains redirect chain, τελευταίο = final
+    // Αλλά πιο απλά: το response URL είναι το final
+    finalUrl = response.context?.history?.at(-1)?.toString() || url
+  } catch {
+    // Network error - keep original
+  }
+  
+  // Clean tracking params
+  finalUrl = cleanUrl(finalUrl)
+  
+  // Cache result
+  setCachedUrl(url, finalUrl)
+  
+  return { final: finalUrl, fromCache: false }
+}
+
+// Rate limiting
+const requestCounts = new Map<string, { count: number; resetTime: number }>()
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000
+const RATE_LIMIT_MAX = 100
+
+function checkRateLimit(ip: string): { allowed: boolean; remaining: number } {
+  const now = Date.now()
+  
+  // Cleanup old entries periodically
+  if (requestCounts.size > 5000) {
+    for (const [key, record] of requestCounts) {
+      if (now > record.resetTime) requestCounts.delete(key)
+    }
+  }
+  
+  const record = requestCounts.get(ip)
+  
+  if (!record || now > record.resetTime) {
+    requestCounts.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW })
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 }
+  }
+  
+  if (record.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0 }
+  }
+  
+  record.count++
+  return { allowed: true, remaining: RATE_LIMIT_MAX - record.count }
+}
+
+const handler: VercelApiHandler = async (req, res) => {
+  // Rate limiting
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || 
+             req.headers['x-real-ip'] as string || 
+             'unknown'
+  
+  const rateLimit = checkRateLimit(ip)
+  res.setHeader('X-RateLimit-Limit', RATE_LIMIT_MAX)
+  res.setHeader('X-RateLimit-Remaining', rateLimit.remaining)
+  
+  if (!rateLimit.allowed) {
+    return res.status(429).json({ 
+      error: 'Too many requests',
+      retryAfter: Math.ceil(RATE_LIMIT_WINDOW / 1000)
+    })
+  }
+
+  const { text = '', cleanTracking = true } = req.body as { 
+    text: string
+    cleanTracking?: boolean
+  }
+
+  if (!text) {
+    return res.status(400).json({ error: 'Text is required' })
+  }
+
+  // URL regex - αποφεύγει trailing punctuation
+  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+[^\s<>"{}|\\^`\[\].,;:!?)]/gi
+  const matches = text.match(urlRegex) || []
+  const uniqueUrls = [...new Set(matches)]
+
+  if (uniqueUrls.length === 0) {
+    return res.status(200).json({ 
+      text,
+      stats: { totalLinks: 0, expanded: 0, cleaned: 0, failed: 0, cached: 0 }
+    })
+  }
+
+  // Parallel processing
+  const results = await Promise.allSettled(
+    uniqueUrls.map(url => resolveUrl(url))
   )
 
   const toReplace = new Map<string, string>()
-  for (const [link] of occurences) {
-    if (toReplace.has(link)) continue
+  const stats = { totalLinks: uniqueUrls.length, expanded: 0, cleaned: 0, failed: 0, cached: 0 }
 
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const {
-        headers: { location }
-      } = await request(link, { method: 'HEAD' })
-
-      if (typeof location === 'string') {
-        toReplace.set(link, location)
-      } else {
-        toReplace.set(link, link)
+  results.forEach((result, i) => {
+    const original = uniqueUrls[i]
+    
+    if (result.status === 'fulfilled') {
+      const { final, fromCache } = result.value
+      
+      if (fromCache) stats.cached++
+      
+      if (final !== original) {
+        toReplace.set(original, final)
+        stats.expanded++
+        if (cleanTracking) stats.cleaned++
       }
-    } catch {
-      toReplace.set(link, link)
+    } else {
+      stats.failed++
     }
+  })
+
+  // Replace URLs
+  let resultText = text
+  for (const [original, final] of toReplace) {
+    resultText = resultText.replaceAll(original, final)
   }
 
-  for (const [link, resolvedUrl] of toReplace) {
-    text = text.replaceAll(link, resolvedUrl)
-  }
-
-  res.status(200).json({ text })
+  res.status(200).json({ text: resultText, stats })
 }
 
 export default handler

@@ -8,7 +8,14 @@ const SKIP_DOMAINS = [
   'schemas.xmlsoap.org',
   'xmlns.com',
   'rdf.data-vocabulary.org',
-  'rss.app'  // Αγνόησε και το rss.app feed URL
+  'rss.app',  // Αγνόησε και το rss.app feed URL
+  // Twitter display/CDN URLs
+  'pic.twitter.com',
+  'pic.x.com',           // Shortlinks που εμφανίζονται στο tweet text
+  'pbs.twimg.com',       // Actual image CDN
+  'abs.twimg.com',
+  'video.twimg.com',
+  'platform.twitter.com'	
 ];
 
 // TRACKING PARAMS

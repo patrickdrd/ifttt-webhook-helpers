@@ -77,6 +77,10 @@ function cleanUrl(urlString) {
       if (videoId) {
         url.search = '';
         url.searchParams.set('v', videoId);
+      } else if (url.pathname.startsWith('/live/')) {
+        // Καθάρισε tracking params από live URLs
+        url.searchParams.delete('si');
+        url.searchParams.delete('feature');
       }
     }
     

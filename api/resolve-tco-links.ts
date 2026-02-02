@@ -232,6 +232,8 @@ const handler: VercelApiHandler = async (req, res) => {
     resultText = resultText.replaceAll(original, final)
   }
 
+	const responseObject = { text: resultText, stats }
+	
   console.log('=== DEBUG INFO ===')
   console.log('Stats object:', JSON.stringify(stats))
   console.log('Full response:', JSON.stringify(responseObject))

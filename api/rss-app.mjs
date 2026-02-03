@@ -185,7 +185,7 @@ export default async function handler(req, res) {
           return hostname === domain || hostname.endsWith('.' + domain);
         });
         if (shouldSkip) {
-          console.log('Skipping namespace/schema URL:', url);
+//          console.log('Skipping namespace/schema URL:', url);
         }
         return !shouldSkip;
       } catch {

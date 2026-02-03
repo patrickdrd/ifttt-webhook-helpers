@@ -21,12 +21,13 @@ const urlCache = new Map<string, { url: string; timestamp: number }>()
 const CACHE_TTL = 24 * 60 * 60 * 1000
 
 function getCachedUrl(url: string): string | null {
-  const cached = urlCache.get(url)
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.url
-  }
-  urlCache.delete(url)
-  return null
+  return null; // FORCE DISABLE
+  // const cached = urlCache.get(url);
+  // if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  //   return cached.url;
+  // }
+  // urlCache.delete(url);
+  // return null;
 }
 
 function setCachedUrl(original: string, resolved: string): void {

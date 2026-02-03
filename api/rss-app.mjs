@@ -9,8 +9,8 @@ const SKIP_DOMAINS = [
   'schemas.xmlsoap.org',
   'xmlns.com',
   'rdf.data-vocabulary.org',
-	'search.yahoo.com',
-  'rss.app',  // Αγνόησε και το rss.app feed URL
+  'search.yahoo.com',
+  'rss.app',
   // Twitter - skip ALL Twitter URLs
   'twitter.com',
   'x.com',
@@ -35,13 +35,13 @@ const urlCache = new Map();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 function getCachedUrl(url) {
-  return null; // FORCE DISABLE
-  // const cached = urlCache.get(url);
-  // if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-  //   return cached.url;
-  // }
-  // urlCache.delete(url);
-  // return null;
+	return null; // FORCE DISABLE
+	// const cached = urlCache.get(url);
+	// if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+	// return cached.url;
+	// }
+	// urlCache.delete(url);
+	// return null;
 }
 
 function setCachedUrl(original, resolved) {
@@ -56,44 +56,22 @@ function cleanUrl(urlString) {
   try {
     const url = new URL(urlString);
     
+    // Remove tracking parameters
     TRACKING_PARAMS.forEach(param => url.searchParams.delete(param));
     
+    // Remove utm_* pattern
     const paramsToDelete = [];
     url.searchParams.forEach((_, key) => {
       if (/^utm_/i.test(key)) paramsToDelete.push(key);
     });
     paramsToDelete.forEach(param => url.searchParams.delete(param));
     
-    if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
-      url.hostname = 'x.com';
+    // Remove Echobox tracking from hash
+    if (url.hash && url.hash.match(/#Echobox=\d+-\d+/)) {
+      url.hash = '';
     }
     
-    if (url.hostname === 'youtu.be') {
-      const videoId = url.pathname.slice(1);
-      url.hostname = 'www.youtube.com';
-      url.pathname = '/watch';
-      url.search = '';
-      url.searchParams.set('v', videoId);
-    } else if (/youtube\.com$/.test(url.hostname)) {
-      const videoId = url.searchParams.get('v');
-      if (videoId) {
-        url.search = '';
-        url.searchParams.set('v', videoId);
-      } else if (url.pathname.startsWith('/live/')) {
-        // Καθάρισε tracking params από live URLs
-        url.searchParams.delete('si');
-        url.searchParams.delete('feature');
-      }
-    }
-    
-    if (/amazon\.(com|gr|de|co\.uk|fr|it|es)$/.test(url.hostname)) {
-      const match = url.pathname.match(/\/dp\/([A-Z0-9]{10})/);
-      if (match) {
-        url.pathname = `/dp/${match[1]}`;
-        url.search = '';
-      }
-    }
-    
+    // Remove trailing slash
     if (url.pathname.endsWith('/') && url.pathname.length > 1) {
       url.pathname = url.pathname.slice(0, -1);
     }
@@ -111,7 +89,7 @@ async function resolveUrl(url) {
     return { final: cached, fromCache: true };
   }
 
-//	console.log(`[RESOLVE START] ${url}`);
+//  console.log(`[RESOLVE START] ${url}`);
   let finalUrl = url;
   let currentUrl = url;
   
@@ -128,22 +106,22 @@ async function resolveUrl(url) {
       const location = response.headers.location;
       
 //      console.log(`[REDIRECT ${i}] Status: ${statusCode}, Location: ${location || 'none'}`);
-			
-			if (statusCode >= 300 && statusCode < 400 && location) {
+      
+      if (statusCode >= 300 && statusCode < 400 && location) {
         currentUrl = new URL(location, currentUrl).href;
       } else {
         finalUrl = currentUrl;
         break;
       }
-    } catch {
-			console.log(`[RESOLVE ERROR] ${err.message}`);
+    } catch (err) {
+      console.log(`[RESOLVE ERROR] ${err.message}`);
       finalUrl = currentUrl;
       break;
     }
   }
   
   finalUrl = cleanUrl(finalUrl);
-//	console.log(`[RESOLVE END] ${url} -> ${finalUrl}`);
+//  console.log(`[RESOLVE END] ${url} -> ${finalUrl}`);
   setCachedUrl(url, finalUrl);
   
   return { final: finalUrl, fromCache: false };
@@ -159,33 +137,32 @@ export default async function handler(req, res) {
     const { body } = await request(`https://rss.app/feeds/${id}`);
     let text = await body.text();
 
-
-		// Expand t.co links πριν το XML processing
-		const tcoRegex = /https?:\/\/t\.co\/[\w]+/gi;
-		const tcoMatches = text.match(tcoRegex) || [];
-		if (tcoMatches.length > 0) {
-		  const tcoResults = await Promise.allSettled(
-		    [...new Set(tcoMatches)].map(url => resolveUrl(url))
-		  );
-		  
-		  const tcoReplacements = new Map();
-		  tcoResults.forEach((result, i) => {
-		    if (result.status === 'fulfilled') {
-		      const original = [...new Set(tcoMatches)][i];
-		      tcoReplacements.set(original, result.value.final);
-		    }
-		  });
-		  
-		  for (const [original, final] of tcoReplacements) {
-		    const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		    const replaceRegex = new RegExp(escapedOriginal, 'g');
-		    const xmlSafeFinal = final.replace(/&/g, '&amp;');
-		    text = text.replace(replaceRegex, xmlSafeFinal);
-		  }
-		}
-				
-    text = modifyXml(text, 'enclosure')
-		
+    // Expand t.co links πριν το XML processing
+    const tcoRegex = /https?:\/\/t\.co\/[\w]+/gi;
+    const tcoMatches = text.match(tcoRegex) || [];
+    if (tcoMatches.length > 0) {
+      const tcoResults = await Promise.allSettled(
+        [...new Set(tcoMatches)].map(url => resolveUrl(url))
+      );
+      
+      const tcoReplacements = new Map();
+      tcoResults.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          const original = [...new Set(tcoMatches)][i];
+          tcoReplacements.set(original, result.value.final);
+        }
+      });
+      
+      for (const [original, final] of tcoReplacements) {
+        const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const replaceRegex = new RegExp(escapedOriginal, 'g');
+        const xmlSafeFinal = final.replace(/&/g, '&amp;');
+        text = text.replace(replaceRegex, xmlSafeFinal);
+      }
+    }
+        
+    text = modifyXml(text, 'enclosure');
+    
     console.log('Original RSS size (bytes):', text.length);
 
     let processedText = text.replace(/\\"/g, '"').replace(/\\'/g, "'");
@@ -200,26 +177,25 @@ export default async function handler(req, res) {
     const allMatches = [...plaintextMatches, ...attributeMatches];
     
     // ΦΙΛΤΡΑΡΕ ΕΔΩ - μετά το allMatches definition
-		const filteredUrls = allMatches.filter(url => {
-		  try {
-		    const hostname = new URL(url).hostname;
-		    const shouldSkip = SKIP_DOMAINS.some(domain => {
-		      // Exact match ή subdomain
-		      return hostname === domain || hostname.endsWith('.' + domain);
-		    });
-		    if (shouldSkip) {
-//		      console.log('Skipping namespace/schema URL:', url);
-		    }
-		    return !shouldSkip;
-		  } catch {
-		    return true;
-		  }
-		});
-
+    const filteredUrls = allMatches.filter(url => {
+      try {
+        const hostname = new URL(url).hostname;
+        const shouldSkip = SKIP_DOMAINS.some(domain => {
+          // Exact match ή subdomain
+          return hostname === domain || hostname.endsWith('.' + domain);
+        });
+        if (shouldSkip) {
+          console.log('Skipping namespace/schema URL:', url);
+        }
+        return !shouldSkip;
+      } catch {
+        return true;
+      }
+    });
     
     const uniqueUrls = [...new Set(filteredUrls)];
 
-//    console.log('Unique URLs found (after filtering):', uniqueUrls);
+    console.log('Unique URLs found (after filtering):', uniqueUrls);
 
     if (uniqueUrls.length === 0) {
       console.log('No URLs to process');
@@ -259,15 +235,15 @@ export default async function handler(req, res) {
     console.log('URLs to replace:', Array.from(toReplace.entries()));
     console.log('Stats:', JSON.stringify(stats));
 
-		for (const [original, final] of toReplace) {
-		  const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		  const replaceRegex = new RegExp(escapedOriginal, 'g');
-		  
-		  // XML-escape το final URL (& → &amp;)
-		  const xmlSafeFinal = final.replace(/&/g, '&amp;');
-		  
-		  text = text.replace(replaceRegex, xmlSafeFinal);
-		}
+    for (const [original, final] of toReplace) {
+      const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const replaceRegex = new RegExp(escapedOriginal, 'g');
+      
+      // XML-escape το final URL (& → &amp;)
+      const xmlSafeFinal = final.replace(/&/g, '&amp;');
+      
+      text = text.replace(replaceRegex, xmlSafeFinal);
+    }
 
     console.log('Final RSS size (bytes):', text.length);
     console.log('=== RSS PROXY END ===');

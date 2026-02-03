@@ -51,33 +51,9 @@ function cleanUrl(urlString: string): string {
     })
     paramsToDelete.forEach(param => url.searchParams.delete(param))
     
-    // Twitter/X normalization
-    if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
-      url.hostname = 'x.com'
-    }
-    
-    // YouTube normalization
-    if (url.hostname === 'youtu.be') {
-      const videoId = url.pathname.slice(1)
-      url.hostname = 'www.youtube.com'
-      url.pathname = '/watch'
-      url.search = ''
-      url.searchParams.set('v', videoId)
-    } else if (/youtube\.com$/.test(url.hostname)) {
-      const videoId = url.searchParams.get('v')
-      if (videoId) {
-        url.search = ''
-        url.searchParams.set('v', videoId)
-      }
-    }
-    
-    // Amazon cleanup
-    if (/amazon\.(com|gr|de|co\.uk|fr|it|es)$/.test(url.hostname)) {
-      const match = url.pathname.match(/\/dp\/([A-Z0-9]{10})/)
-      if (match) {
-        url.pathname = `/dp/${match[1]}`
-        url.search = ''
-      }
+    // Remove Echobox tracking from hash
+    if (url.hash && url.hash.match(/#Echobox=\d+-\d+/)) {
+      url.hash = ''
     }
     
     // Remove trailing slash

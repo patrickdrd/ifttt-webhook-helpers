@@ -67,10 +67,15 @@ function cleanUrl(urlString: string): string {
     })
     paramsToDelete.forEach(param => url.searchParams.delete(param))
     
-    // Twitter/X normalization
-    if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
-      url.hostname = 'x.com'
+    // Remove Echobox tracking from hash
+    if (url.hash && url.hash.match(/#Echobox=\d+-\d+/)) {
+      url.hash = ''
     }
+		
+		// Twitter/X normalization
+//    if (/^(www\.)?(twitter|x)\.com$/.test(url.hostname)) {
+//      url.hostname = 'x.com'
+//    }
     
     // YouTube normalization
     if (url.hostname === 'youtu.be') {

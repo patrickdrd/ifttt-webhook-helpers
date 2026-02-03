@@ -158,6 +158,32 @@ export default async function handler(req, res) {
     
     const { body } = await request(`https://rss.app/feeds/${id}`);
     let text = await body.text();
+
+
+		// Expand t.co links πριν το XML processing
+		const tcoRegex = /https?:\/\/t\.co\/[\w]+/gi;
+		const tcoMatches = text.match(tcoRegex) || [];
+		if (tcoMatches.length > 0) {
+		  const tcoResults = await Promise.allSettled(
+		    [...new Set(tcoMatches)].map(url => resolveUrl(url))
+		  );
+		  
+		  const tcoReplacements = new Map();
+		  tcoResults.forEach((result, i) => {
+		    if (result.status === 'fulfilled') {
+		      const original = [...new Set(tcoMatches)][i];
+		      tcoReplacements.set(original, result.value.final);
+		    }
+		  });
+		  
+		  for (const [original, final] of tcoReplacements) {
+		    const escapedOriginal = original.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		    const replaceRegex = new RegExp(escapedOriginal, 'g');
+		    const xmlSafeFinal = final.replace(/&/g, '&amp;');
+		    text = text.replace(replaceRegex, xmlSafeFinal);
+		  }
+		}
+				
     text = modifyXml(text, 'enclosure')
 		
     console.log('Original RSS size (bytes):', text.length);
